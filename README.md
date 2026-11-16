@@ -27,7 +27,7 @@ Tested on the reccomended versions only.
 ## NixOS
 1. Clone the repo
 ```
-git clone https://github.com/KaloyanSvilenov/music_player.git
+git clone https://github.com/kokosv/music_player.git
 cd music_player
 ```
 2. Enter dev shell for all dependencies
@@ -41,7 +41,8 @@ nix build
 Extras:
 - If you want just the dev shell you can do (without cloning the repo)
 ```
-nix develop github:KaloyanSvilenov/music_player
+nix develop github:kokosv/music_player
+
 ```
 # Useful
 
