@@ -47,3 +47,8 @@ void PlayButton::setToPlaying(){
     isPlaying = true;
     setIcon(QIcon(defaultPauseIconPath));
 }
+
+void PlayButton::setToPaused(){
+    isPlaying = false;
+    setIcon(QIcon(defaultPlayIconPath));
+}

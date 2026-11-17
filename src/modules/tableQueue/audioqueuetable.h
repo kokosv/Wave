@@ -11,8 +11,7 @@
 #include <QQueue>
 #include <QString>
 #include <QLabel>
-#include <QListView>
-#include <QStandardItemModel>
+#include <QEvent>
 
 class AudioQueueTable : public QObject
 {
@@ -22,7 +21,7 @@ public:
                              AudioPlayer *audioPlayer,
                              WaveformProgressBar* bar,
                              PlayButton *button,
-                             QListView* metadataView = nullptr,
+                             QLabel* metadataLabel = nullptr,
                              QLabel* coverArtLabel = nullptr,
                              QObject *parent = nullptr);
 
@@ -49,14 +48,19 @@ public:
     // Internal queue storage
     QQueue<QString> m_fileQueue;
 
-    void setDisplayWidgets(QListView* metadataView, QLabel* coverArtLabel);
+    void setDisplayWidgets(QLabel* metadataLabel, QLabel* coverArtLabel);
 
     // Methods for playing the next/previous song
-    void nextSong();  // Play the next song
+    void nextSong();  // Play the next song, consuming the one that just finished
     void previousSong();  // Play the previous song
     void shuffleQueue();
     void setLoopEnabled(bool enabled);
     bool isLoopEnabled() const;  // Getter for loopEnabled flag
+
+    bool hasActiveSong() const;
+    void playFirstOrCurrent();  // Start playback if nothing is active yet
+
+    bool eventFilter(QObject *watched, QEvent *event) override;
 
 signals:
     void queueChanged();
@@ -69,20 +73,26 @@ private slots:
     void displayMetadata(int row);
     void displayCoverArt(const QString& filePath);
     void onMediaStatusChanged(QMediaPlayer::MediaStatus status);
-    void playSongAtIndex(int indexChange);  // Internal slot for handling the next song
+    void handleFilesDropped(const QStringList &filePaths);
+
 private:
+    void playCurrentIndex();
+    void resetPlayerUI();
+    void applyColumnWidthPercentages();
+    void writeRow(int row, const AudioMetadata &meta, const QString &filePath);
+    void renumberRows();
+
     AudioMetadataReader m_metadataReader;
     QTableWidget *m_tableWidget;
     QMenu *m_contextMenu;
     int currentSongIndex;
-    QListView* m_metadataView;
+    QLabel* m_metadataLabel;
     QLabel* m_coverArtLabel;
-    QStandardItemModel* m_metadataModel;
     AudioPlayer* player;
     WaveformProgressBar* progressBar;
     PlayButton* playButton;
     bool loopEnabled = false;
-    int pendingRow = -1;
+    bool m_resizingColumns = false;
     QString pendingFilePath;
 };
 #endif // AUDIOQUEUEMANAGER_H

@@ -17,11 +17,13 @@ public:
     void setVolume(float volume);
     QMediaPlayer* getPlayer() const;
     void play();
+    void stopAndClear();
 
 private:
     QMediaPlayer *player;
     QAudioOutput *audioOutput;
     bool isPlaying;
+    bool m_pendingPlay = false;
     QString currSong;
 };
 

@@ -30,6 +30,7 @@ public slots:
     void addDirectoryToTree(const QPoint &pos);
     void scanDirectory(QTreeWidgetItem *parentItem, const QString &path);
     void searchFiles(const QString &filter, const QString &searchText);
+    void refreshTree();
 
 private:
     QTreeWidget *m_treeWidget;
@@ -40,6 +41,10 @@ private:
 
     void addAudioFilesToTree(QTreeWidgetItem *parent, const QString &dirPath);
     void clearAllDirectories();
+    bool isAudioFile(const QString &path) const;
+    void collectAudioFilesUnder(const QString &path, QList<AudioMetadata> &results);
+    QSet<QString> captureExpandedPaths() const;
+    void applyExpandedPaths(const QSet<QString> &expandedPaths);
 
     void searchDirectory(QTreeWidgetItem* parent, const QString& path,
                          const QString& filter, const QString& searchText,

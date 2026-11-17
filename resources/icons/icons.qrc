@@ -12,10 +12,14 @@
         <file>pause.png</file>
         <file>play_hover.png</file>
         <file>play.png</file>
+        <file>refresh_hover.png</file>
+        <file>refresh.png</file>
         <file>shuffle_hover.png</file>
         <file>shuffle.png</file>
         <file>volume_hover.png</file>
         <file>volume.png</file>
+        <file>volume_muted_hover.png</file>
+        <file>volume_muted.png</file>
         <file>search.png</file>
     </qresource>
 </RCC>

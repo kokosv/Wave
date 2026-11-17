@@ -7,6 +7,9 @@
 #include <QMediaPlayer>
 #include <QFileDialog>
 #include <QStandardPaths>
+#include <QMouseEvent>
+#include <QStyle>
+#include <QStyleOptionSlider>
 #include <player/audioplayer.h>
 
 QString formatTime(qint64 ms);
@@ -23,10 +26,15 @@ MainWindow::MainWindow(QWidget *parent)
                                        audioPlayer,
                                        ui->progressBar,
                                        ui->pausePlay,
-                                       ui->listViewMetaData,  // Your QListView
+                                       ui->metadataLabel,
                                        ui->label,            // Your QLabel for cover art
                                        this);
     m_treeWindowManager = new TreeWidgetWindow(ui->fileTree, this);
+
+    // Give the tree/search panel enough starting width for the search box +
+    // filter + refresh buttons; otherwise the splitter's sizeHint-based guess
+    // can under-allocate it and the row spills past the panel's right edge.
+    ui->splitter->setSizes({320, 706, 250});
 
     // Set up context menu
     m_queueTable->onCustomContextMenuRequested();
@@ -38,6 +46,7 @@ MainWindow::MainWindow(QWidget *parent)
       
     //Button Icons
     ui->filterButton->setIconSize(QSize(25, 25));
+    ui->refreshButton->setIconSize(QSize(25, 25));
     ui->loopButton->setIconSize(QSize(40, 40));
     ui->shuffleButton->setIconSize(QSize(25, 25));
     ui->pausePlay->setIconSize(QSize(50,50));
@@ -58,7 +67,11 @@ MainWindow::MainWindow(QWidget *parent)
     ui->pausePlay->setDefaultPauseIcon(":/icons/pause.png");
     ui->pausePlay->setHoverPauseIcon(":/icons/pause_hover.png");
     ui->volumeIcon->setDefaultIcon(":/icons/volume.png");
-    ui->volumeIcon->setHoverIcon(":/icons/volume.png");
+    ui->volumeIcon->setHoverIcon(":/icons/volume_hover.png");
+    ui->volumeIcon->setToolTip("Mute");
+    ui->refreshButton->setDefaultIcon(":/icons/refresh.png");
+    ui->refreshButton->setHoverIcon(":/icons/refresh_hover.png");
+    ui->refreshButton->setToolTip("Refresh directory");
 
     //Filter Button dropdown Menu
     QMenu *menu = new QMenu(this);\
@@ -75,14 +88,67 @@ MainWindow::MainWindow(QWidget *parent)
     //Audio Player
 
     connect(ui->pausePlay, &QPushButton::clicked, this, [=]() {
-        audioPlayer->togglePlayPause();
+        if (!m_queueTable->hasActiveSong()) {
+            // Nothing loaded yet (e.g. queue was just filled) - start at the
+            // front of the queue instead of toggling an empty player.
+            m_queueTable->playFirstOrCurrent();
+        } else {
+            audioPlayer->togglePlayPause();
+        }
     });
 
-    audioPlayer->setVolume(ui->volumeSlider->value() / 100);
+    // Mute toggle - drives the slider itself (0 when muted, restored to its
+    // last value on unmute) so the slider position and the icon always agree
+    // with what's actually audible, instead of a separate hidden mute flag.
+    connect(ui->volumeIcon, &QPushButton::clicked, this, [=]() {
+        if (!m_isMuted) {
+            if (ui->volumeSlider->value() > 0) {
+                m_preMuteVolume = ui->volumeSlider->value();
+            }
+            m_isMuted = true;
+            ui->volumeSlider->setValue(0);
+        } else {
+            m_isMuted = false;
+            ui->volumeSlider->setValue(m_preMuteVolume);
+        }
+        ui->volumeIcon->setDefaultIcon(m_isMuted ? ":/icons/volume_muted.png" : ":/icons/volume.png");
+        ui->volumeIcon->setHoverIcon(m_isMuted ? ":/icons/volume_muted_hover.png" : ":/icons/volume_hover.png");
+        ui->volumeIcon->setToolTip(m_isMuted ? "Unmute" : "Mute");
+    });
+
+    // Refresh the currently open directory in the tree
+    connect(ui->refreshButton, &QPushButton::clicked,
+            m_treeWindowManager, &TreeWidgetWindow::refreshTree);
+
+    // Enable/disable playback controls based on whether the queue has anything in it
+    auto updatePlaybackControlsEnabled = [this]() {
+        bool hasItems = !m_queueTable->isEmpty();
+        ui->pausePlay->setEnabled(hasItems);
+        ui->backButton->setEnabled(hasItems);
+        ui->nextButton->setEnabled(hasItems);
+        ui->loopButton->setEnabled(hasItems);
+        ui->shuffleButton->setEnabled(hasItems);
+    };
+    connect(m_queueTable, &AudioQueueTable::queueChanged, this, updatePlaybackControlsEnabled);
+    updatePlaybackControlsEnabled();
+
+    // Clicking anywhere on the volume slider should jump straight to that
+    // position, rather than Qt's default "nudge by one step" behavior.
+    ui->volumeSlider->installEventFilter(this);
+
+    audioPlayer->setVolume(ui->volumeSlider->value() / 100.0);
 
     //Volume Control
     connect(ui->volumeSlider, &QSlider::valueChanged, this, [=](int value) {
         audioPlayer->setVolume(value / 100.0);
+
+        // If the user drags the slider back up themselves, that's an implicit unmute.
+        if (m_isMuted && value > 0) {
+            m_isMuted = false;
+            ui->volumeIcon->setDefaultIcon(":/icons/volume.png");
+            ui->volumeIcon->setHoverIcon(":/icons/volume_hover.png");
+            ui->volumeIcon->setToolTip("Mute");
+        }
     });
 
     connect(audioPlayer->getPlayer(), &QMediaPlayer::positionChanged, this, [=](qint64 pos) {
@@ -116,6 +182,34 @@ MainWindow::MainWindow(QWidget *parent)
     });
     this->addAction(clearSearch);
 
+}
+
+bool MainWindow::eventFilter(QObject *watched, QEvent *event)
+{
+    if (watched == ui->volumeSlider && event->type() == QEvent::MouseButtonPress) {
+        auto *mouseEvent = static_cast<QMouseEvent*>(event);
+        if (mouseEvent->button() == Qt::LeftButton) {
+            QSlider *slider = ui->volumeSlider;
+            QStyleOptionSlider opt;
+            opt.initFrom(slider);
+            opt.minimum = slider->minimum();
+            opt.maximum = slider->maximum();
+            opt.sliderPosition = slider->value();
+            QRect handleRect = slider->style()->subControlRect(
+                QStyle::CC_Slider, &opt, QStyle::SC_SliderHandle, slider);
+
+            // Only override the click-outside-the-handle case; dragging the
+            // handle itself keeps its normal behavior.
+            if (!handleRect.contains(mouseEvent->pos())) {
+                int pos = mouseEvent->pos().x();
+                int newValue = QStyle::sliderValueFromPosition(
+                    slider->minimum(), slider->maximum(), pos, slider->width());
+                slider->setValue(newValue);
+                return true;
+            }
+        }
+    }
+    return QMainWindow::eventFilter(watched, event);
 }
 
 void MainWindow::onMenuActionTriggered(QAction *action) {

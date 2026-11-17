@@ -66,6 +66,12 @@
           <height>1555555</height>
          </size>
         </property>
+        <property name="maximum">
+         <number>100</number>
+        </property>
+        <property name="value">
+         <number>50</number>
+        </property>
         <property name="orientation">
          <enum>Qt::Orientation::Horizontal</enum>
         </property>
@@ -229,11 +235,33 @@
              </property>
             </widget>
            </item>
+           <item>
+            <widget class="HoverButton" name="refreshButton">
+             <property name="minimumSize">
+              <size>
+               <width>0</width>
+               <height>33</height>
+              </size>
+             </property>
+             <property name="maximumSize">
+              <size>
+               <width>50</width>
+               <height>16777215</height>
+              </size>
+             </property>
+             <property name="toolTip">
+              <string>Refresh directory</string>
+             </property>
+             <property name="text">
+              <string/>
+             </property>
+            </widget>
+           </item>
           </layout>
          </widget>
         </item>
         <item>
-         <widget class="QTreeWidget" name="fileTree">
+         <widget class="AudioTreeWidget" name="fileTree">
           <property name="minimumSize">
            <size>
             <width>200</width>
@@ -241,7 +269,10 @@
            </size>
           </property>
           <property name="dragEnabled">
-           <bool>false</bool>
+           <bool>true</bool>
+          </property>
+          <property name="dragDropMode">
+           <enum>QAbstractItemView::DragDropMode::DragOnly</enum>
           </property>
           <column>
            <property name="text">
@@ -252,7 +283,7 @@
         </item>
        </layout>
       </widget>
-      <widget class="QTableWidget" name="tableWidget">
+      <widget class="AudioQueueTableWidget" name="tableWidget">
        <property name="sizePolicy">
         <sizepolicy hsizetype="Expanding" vsizetype="Preferred">
          <horstretch>0</horstretch>
@@ -284,10 +315,10 @@
         <bool>false</bool>
        </property>
        <property name="dragDropMode">
-        <enum>QAbstractItemView::DragDropMode::NoDragDrop</enum>
+        <enum>QAbstractItemView::DragDropMode::DropOnly</enum>
        </property>
        <property name="defaultDropAction">
-        <enum>Qt::DropAction::IgnoreAction</enum>
+        <enum>Qt::DropAction::CopyAction</enum>
        </property>
        <property name="alternatingRowColors">
         <bool>true</bool>
@@ -378,7 +409,26 @@
           </property>
           <layout class="QGridLayout" name="gridLayout">
            <item row="0" column="0">
-            <widget class="QListView" name="listViewMetaData"/>
+            <widget class="QLabel" name="metadataLabel">
+             <property name="sizePolicy">
+              <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
+               <horstretch>0</horstretch>
+               <verstretch>0</verstretch>
+              </sizepolicy>
+             </property>
+             <property name="text">
+              <string/>
+             </property>
+             <property name="wordWrap">
+              <bool>true</bool>
+             </property>
+             <property name="alignment">
+              <set>Qt::AlignmentFlag::AlignLeading|Qt::AlignmentFlag::AlignLeft|Qt::AlignmentFlag::AlignTop</set>
+             </property>
+             <property name="margin">
+              <number>10</number>
+             </property>
+            </widget>
            </item>
           </layout>
          </widget>
@@ -472,6 +522,16 @@
   </action>
  </widget>
  <customwidgets>
+  <customwidget>
+   <class>AudioTreeWidget</class>
+   <extends>QTreeWidget</extends>
+   <header>dirTree/audiotreewidget.h</header>
+  </customwidget>
+  <customwidget>
+   <class>AudioQueueTableWidget</class>
+   <extends>QTableWidget</extends>
+   <header>tableQueue/audioqueuetablewidget.h</header>
+  </customwidget>
   <customwidget>
    <class>WaveformProgressBar</class>
    <extends>QProgressBar</extends>

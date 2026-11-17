@@ -12,6 +12,7 @@ public:
     void setHoverPauseIcon(const QString &path);
     void changePlaying();
     void setToPlaying();
+    void setToPaused();
 
 protected:
     void enterEvent(QEnterEvent *event) override;

@@ -9,6 +9,7 @@ TEMPLATE = app
 
 # Source files
 SOURCES += \
+    src/modules/dirTree/audiotreewidget.cpp \
     src/modules/dirTree/searchbox.cpp \
     src/modules/main/main.cpp \
     src/modules/main/mainwindow.cpp \
@@ -19,10 +20,12 @@ SOURCES += \
     src/modules/player/playbutton.cpp \
     src/modules/player/waveformprogressbar.cpp \
     src/modules/tableQueue/audiometadata.cpp \
-    src/modules/tableQueue/audioqueuetable.cpp
+    src/modules/tableQueue/audioqueuetable.cpp \
+    src/modules/tableQueue/audioqueuetablewidget.cpp
 
 # Header files
 HEADERS += \
+    src/modules/dirTree/audiotreewidget.h \
     src/modules/dirTree/searchbox.h \
     src/modules/main/mainwindow.h \
     src/modules/dirTree/treewidgetwindow.h \
@@ -32,7 +35,8 @@ HEADERS += \
     src/modules/player/playbutton.h \
     src/modules/player/waveformprogressbar.h \
     src/modules/tableQueue/audiometadata.h \
-    src/modules/tableQueue/audioqueuetable.h
+    src/modules/tableQueue/audioqueuetable.h \
+    src/modules/tableQueue/audioqueuetablewidget.h
 
 # UI files
 FORMS += \

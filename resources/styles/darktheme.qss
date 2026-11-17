@@ -118,6 +118,13 @@ QWidget {
     border-left: none;
 }
 
+#refreshButton {
+    border-top: 1px solid #D0CCD0;
+    border-bottom: none;
+    border-right: 1px solid #D0CCD0;
+    border-left: none;
+}
+
 #filterButton::menu-indicator {
     image: none;
     width: 0px;

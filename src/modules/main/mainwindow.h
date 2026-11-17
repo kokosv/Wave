@@ -23,6 +23,9 @@ public:
     MainWindow(QWidget *parent = nullptr);
     ~MainWindow();
 
+protected:
+    bool eventFilter(QObject *watched, QEvent *event) override;
+
 private slots:
     void on_pausePlay_clicked();
 
@@ -40,6 +43,8 @@ private:
     Ui::MainWindow *ui;
     TreeWidgetWindow *m_treeWindowManager;
     AudioQueueTable *m_queueTable;
+    bool m_isMuted = false;
+    int m_preMuteVolume = 50;
 };
 
 #endif // MAINWINDOW_H

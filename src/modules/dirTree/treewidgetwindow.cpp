@@ -20,7 +20,7 @@ TreeWidgetWindow::TreeWidgetWindow(QTreeWidget *treeWidget, QObject *parent)
     connect(m_treeWidget, &QTreeWidget::customContextMenuRequested,
             this, &TreeWidgetWindow::onCustomContextMenuRequested);
 
-    m_treeWidget->setSelectionMode(QAbstractItemView::SingleSelection);
+    m_treeWidget->setSelectionMode(QAbstractItemView::ExtendedSelection);
 
     // Restore state immediately after construction
     restoreState();
@@ -31,42 +31,145 @@ void TreeWidgetWindow::clearAllDirectories()
     m_treeWidget->clear();
 }
 
+bool TreeWidgetWindow::isAudioFile(const QString &path) const
+{
+    return path.endsWith(".mp3", Qt::CaseInsensitive) ||
+           path.endsWith(".wav", Qt::CaseInsensitive) ||
+           path.endsWith(".flac", Qt::CaseInsensitive);
+}
+
 void TreeWidgetWindow::onCustomContextMenuRequested(const QPoint &pos)
 {
     QMenu contextMenu(m_treeWidget->viewport());
 
     QTreeWidgetItem *clickedItem = m_treeWidget->itemAt(pos);
-    QAction *addToQueueAction = contextMenu.addAction("Add to queue");
-    QAction *addDirAction = contextMenu.addAction("Add Directory...");
-
-    if (clickedItem) {
-        QString filePath = clickedItem->data(0, Qt::UserRole).toString();
-        bool isAudioFile = filePath.endsWith(".mp3") || filePath.endsWith(".wav") || filePath.endsWith(".flac");
-
-        // Enable/disable actions based on item type
-        addToQueueAction->setEnabled(isAudioFile);
-        addDirAction->setEnabled(!isAudioFile);
-
-        // Connect actions conditionally
-        if (isAudioFile) {
-            connect(addToQueueAction, &QAction::triggered, this, [this, filePath]() {
-                emit fileAddRequested(filePath);
-            });
-        } else {
-            connect(addDirAction, &QAction::triggered, this, [this, pos]() {
-                addDirectoryToTree(pos);
-            });
-        }
-    } else {
-        // No item clicked - disable both actions
-        addToQueueAction->setEnabled(false);
-        addDirAction->setEnabled(true);
-        connect(addDirAction, &QAction::triggered, this, [this, pos]() {
-            addDirectoryToTree(pos);
-        });
+    QList<QTreeWidgetItem*> selectedItems = m_treeWidget->selectedItems();
+    if (clickedItem && !selectedItems.contains(clickedItem)) {
+        selectedItems = {clickedItem};
     }
 
+    QStringList audioFiles;
+    QStringList directories;
+    for (QTreeWidgetItem *item : selectedItems) {
+        QString path = item->data(0, Qt::UserRole).toString();
+        if (path.isEmpty()) continue;
+
+        QFileInfo info(path);
+        if (info.isDir()) {
+            directories << path;
+        } else if (isAudioFile(path)) {
+            audioFiles << path;
+        }
+    }
+
+    QAction *addToQueueAction = contextMenu.addAction(
+        audioFiles.size() > 1 ? QString("Add %1 songs to queue").arg(audioFiles.size())
+                               : "Add to queue");
+    QAction *addFolderToQueueAction = contextMenu.addAction(
+        directories.size() > 1 ? "Add folders to queue" : "Add folder to queue");
+    contextMenu.addSeparator();
+    QAction *openDirAction = contextMenu.addAction("Open Directory...");
+    QAction *refreshAction = contextMenu.addAction("Refresh");
+
+    addToQueueAction->setEnabled(!audioFiles.isEmpty());
+    addFolderToQueueAction->setEnabled(!directories.isEmpty());
+    refreshAction->setEnabled(!m_lastOpenedDir.isEmpty());
+
+    connect(addToQueueAction, &QAction::triggered, this, [this, audioFiles]() {
+        for (const QString &filePath : audioFiles) {
+            emit fileAddRequested(filePath);
+        }
+    });
+
+    connect(addFolderToQueueAction, &QAction::triggered, this, [this, directories]() {
+        for (const QString &dirPath : directories) {
+            QList<AudioMetadata> files;
+            collectAudioFilesUnder(dirPath, files);
+            std::sort(files.begin(), files.end(), [](const AudioMetadata &a, const AudioMetadata &b) {
+                return a.filePath.compare(b.filePath, Qt::CaseInsensitive) < 0;
+            });
+            for (const AudioMetadata &meta : files) {
+                emit fileAddRequested(meta.filePath);
+            }
+        }
+    });
+
+    connect(openDirAction, &QAction::triggered, this, [this, pos]() {
+        addDirectoryToTree(pos);
+    });
+
+    connect(refreshAction, &QAction::triggered, this, &TreeWidgetWindow::refreshTree);
+
     contextMenu.exec(m_treeWidget->viewport()->mapToGlobal(pos));
+}
+
+void TreeWidgetWindow::refreshTree()
+{
+    if (m_lastOpenedDir.isEmpty() || !QDir(m_lastOpenedDir).exists()) return;
+
+    QSet<QString> expandedPaths = captureExpandedPaths();
+
+    clearAllDirectories();
+    m_metadataCache.clear();
+
+    QTreeWidgetItem* newItem = new QTreeWidgetItem(m_treeWidget);
+    newItem->setText(0, QDir(m_lastOpenedDir).dirName());
+    newItem->setData(0, Qt::UserRole, m_lastOpenedDir);
+    newItem->setIcon(0, m_treeWidget->style()->standardIcon(QStyle::SP_DirIcon));
+
+    scanDirectory(newItem, m_lastOpenedDir);
+    applyExpandedPaths(expandedPaths);
+
+    emit directoryAdded();
+}
+
+QSet<QString> TreeWidgetWindow::captureExpandedPaths() const
+{
+    QSet<QString> expandedPaths;
+    QTreeWidgetItemIterator it(m_treeWidget);
+    while (*it) {
+        if ((*it)->isExpanded() && !(*it)->data(0, Qt::UserRole).toString().isEmpty()) {
+            expandedPaths << (*it)->data(0, Qt::UserRole).toString();
+        }
+        ++it;
+    }
+    return expandedPaths;
+}
+
+void TreeWidgetWindow::applyExpandedPaths(const QSet<QString> &expandedPaths)
+{
+    QTreeWidgetItemIterator it(m_treeWidget);
+    while (*it) {
+        QString itemPath = (*it)->data(0, Qt::UserRole).toString();
+        if (expandedPaths.contains(itemPath)) {
+            (*it)->setExpanded(true);
+        }
+        ++it;
+    }
+}
+
+void TreeWidgetWindow::collectAudioFilesUnder(const QString &path, QList<AudioMetadata> &results)
+{
+    std::function<void(const QString&)> collector = [&](const QString &dirPath) {
+        QDir dir(dirPath);
+
+        const QFileInfoList files = dir.entryInfoList(audioExtensions, QDir::Files);
+        for (const QFileInfo &fileInfo : files) {
+            AudioMetadata* meta = m_metadataCache.object(fileInfo.absoluteFilePath());
+            if (!meta) {
+                meta = new AudioMetadata(m_metadataReader.readMetadata(fileInfo.absoluteFilePath()));
+                m_metadataCache.insert(fileInfo.absoluteFilePath(), meta);
+            }
+            results.append(*meta);
+        }
+
+        const QFileInfoList dirs = dir.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot);
+        for (const QFileInfo &dirInfo : dirs) {
+            collector(dirInfo.absoluteFilePath());
+        }
+    };
+
+    collector(path);
 }
 
 void TreeWidgetWindow::addDirectoryToTree(const QPoint &pos)
@@ -147,17 +250,7 @@ void TreeWidgetWindow::saveState()
 
     QSettings settings(configPath, QSettings::IniFormat);
     settings.setValue("lastOpenedDir", m_lastOpenedDir);
-
-    // Save expanded state
-    QStringList expandedPaths;
-    QTreeWidgetItemIterator it(m_treeWidget);
-    while (*it) {
-        if ((*it)->isExpanded() && !(*it)->data(0, Qt::UserRole).toString().isEmpty()) {
-            expandedPaths << (*it)->data(0, Qt::UserRole).toString();
-        }
-        ++it;
-    }
-    settings.setValue("expandedPaths", expandedPaths);
+    settings.setValue("expandedPaths", QStringList(captureExpandedPaths().values()));
 }
 
 void TreeWidgetWindow::restoreState()
@@ -180,14 +273,7 @@ void TreeWidgetWindow::restoreState()
 
         // Restore expanded state after directory is loaded
         QStringList expandedPaths = settings.value("expandedPaths").toStringList();
-        QTreeWidgetItemIterator it(m_treeWidget);
-        while (*it) {
-            QString itemPath = (*it)->data(0, Qt::UserRole).toString();
-            if (expandedPaths.contains(itemPath)) {
-                (*it)->setExpanded(true);
-            }
-            ++it;
-        }
+        applyExpandedPaths(QSet<QString>(expandedPaths.begin(), expandedPaths.end()));
 
         emit directoryAdded();
     }
@@ -295,28 +381,7 @@ void TreeWidgetWindow::groupFiles(const QList<AudioMetadata>& files, const QStri
 
 void TreeWidgetWindow::collectAllAudioFiles(QList<AudioMetadata>& results)
 {
-    std::function<void(const QString&)> collector = [&](const QString &path) {
-        QDir dir(path);
-
-        // Process files
-        const QFileInfoList files = dir.entryInfoList(audioExtensions, QDir::Files);
-        for (const QFileInfo &fileInfo : files) {
-            AudioMetadata* meta = m_metadataCache.object(fileInfo.absoluteFilePath());
-            if (!meta) {
-                meta = new AudioMetadata(m_metadataReader.readMetadata(fileInfo.absoluteFilePath()));
-                m_metadataCache.insert(fileInfo.absoluteFilePath(), meta);
-            }
-            results.append(*meta);
-        }
-
-        // Process subdirectories
-        const QFileInfoList dirs = dir.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot);
-        for (const QFileInfo &dirInfo : dirs) {
-            collector(dirInfo.absoluteFilePath());
-        }
-    };
-
-    collector(m_lastOpenedDir);
+    collectAudioFilesUnder(m_lastOpenedDir, results);
 }
 
 void TreeWidgetWindow::collectMatchingFiles(const QString &filter, const QString &searchText,

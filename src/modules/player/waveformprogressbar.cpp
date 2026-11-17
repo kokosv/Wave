@@ -2,6 +2,7 @@
 #include <QPainter>
 #include <QStyleOptionProgressBar>
 #include <QAudioDecoder>
+#include <QAudioFormat>
 #include <QDebug>
 
 WaveformProgressBar::WaveformProgressBar(QWidget *parent)
@@ -43,20 +44,24 @@ void WaveformProgressBar::loadWaveformData()
     stopAndClearDecoder();
 
     m_decoder = new QAudioDecoder(this);
-    m_decoder->setSource(QUrl::fromLocalFile(m_audioFilePath));
 
-    if (m_decoder->error() != QAudioDecoder::NoError) {
-        qDebug() << "Failed to open audio file:" << m_audioFilePath << m_decoder->errorString();
-        m_decoder->deleteLater();
-        m_decoder = nullptr;
-        return;
-    }
+    // Without an explicit format, the decoder picks whatever the file's
+    // native format happens to be (often 32-bit float) while the buffer
+    // reader below assumed 16-bit integer samples - garbage amplitudes in,
+    // garbage (or an empty-looking) waveform out. Pin it down explicitly.
+    QAudioFormat format;
+    format.setSampleFormat(QAudioFormat::Int16);
+    m_decoder->setAudioFormat(format);
+
+    m_decoder->setSource(QUrl::fromLocalFile(m_audioFilePath));
 
     m_pendingWaveform.clear();
     m_isLoading = true;
 
     connect(m_decoder, &QAudioDecoder::bufferReady, this, [=]() {
         QAudioBuffer buffer = m_decoder->read();
+        if (!buffer.isValid()) return;
+
         const qint16 *data = buffer.constData<qint16>();
         int sampleCount = buffer.sampleCount();
 
@@ -67,13 +72,15 @@ void WaveformProgressBar::loadWaveformData()
 
     connect(m_decoder, &QAudioDecoder::finished, this, [=]() {
         QVector<float> finalData;
-        int targetSamples = qMin(1000, width());
+        int targetSamples = qMin(1000, qMax(1, width()));
 
         m_tempSamples = m_pendingWaveform;
 
-        for (int i = 0; i < targetSamples; ++i) {
-            int srcIndex = (i * m_tempSamples.size()) / targetSamples;
-            finalData.append(qBound(-1.0f, m_tempSamples.value(srcIndex), 1.0f));
+        if (!m_tempSamples.isEmpty()) {
+            for (int i = 0; i < targetSamples; ++i) {
+                int srcIndex = (i * m_tempSamples.size()) / targetSamples;
+                finalData.append(qBound(-1.0f, m_tempSamples.value(srcIndex), 1.0f));
+            }
         }
 
         m_waveformData = finalData;
@@ -83,6 +90,17 @@ void WaveformProgressBar::loadWaveformData()
         emit waveformReady();
         m_decoder->deleteLater();
         m_decoder = nullptr; // Clear pointer after decoding
+    });
+
+    connect(m_decoder, QOverload<QAudioDecoder::Error>::of(&QAudioDecoder::error), this, [=](QAudioDecoder::Error error) {
+        qDebug() << "Waveform decode failed for" << m_audioFilePath << ":" << error << m_decoder->errorString();
+        m_pendingWaveform.clear();
+        m_isLoading = false;
+        update();
+        if (m_decoder) {
+            m_decoder->deleteLater();
+            m_decoder = nullptr;
+        }
     });
 
     m_decoder->start();
@@ -152,36 +170,39 @@ void WaveformProgressBar::paintEvent(QPaintEvent *event)
 
     int w = width();
     int h = height();
-    float progress = (value() - minimum()) / static_cast<float>(maximum() - minimum());
+    int range = maximum() - minimum();
+    float progress = range > 0 ? (value() - minimum()) / static_cast<float>(range) : 0.0f;
     int progressWidth = static_cast<int>(w * progress);
 
-    QColor bgColor("#D0CCD0");
-    QColor fgColor("#BD93F9");
+    QColor bgColor("#5A5673");   // unplayed track
+    QColor fgColor("#BD93F9");   // played portion
+    QColor waveUnplayed("#938A93");
+    QColor wavePlayed("#2E2A3A");
+
+    // The colored fill always reflects play position, even if the waveform
+    // itself hasn't (or can't) finish decoding - the progress bar is never
+    // just a flat, uninformative line.
+    painter.fillRect(QRect(0, 0, w, h), bgColor);
+    if (progressWidth > 0) {
+        painter.fillRect(QRect(0, 0, progressWidth, h), fgColor);
+    }
 
     if (!m_waveformData.isEmpty() && !m_isLoading) {
-        // Waveform background drawing
-        painter.setPen(QPen(bgColor, 1));
+        // The waveform itself *is* the progress bar's surface: its bars are
+        // drawn on top of the fill above, using a darker stroke over the
+        // played (purple) region so it stays visible over both colors.
         for (int i = 0; i < m_waveformData.size(); ++i) {
             int x = (i * w) / m_waveformData.size();
             float amplitude = m_waveformData[i];
             int lineHeight = static_cast<int>(amplitude * h / 2);
-            painter.drawLine(x, h / 2, x, h / 2 + lineHeight);
-            painter.drawLine(x, h / 2, x, h / 2 - lineHeight);
-        }
-
-        // Waveform progress drawing
-        painter.setPen(QPen(fgColor, 1));
-        for (int i = 0; i < m_waveformData.size(); ++i) {
-            int x = (i * w) / m_waveformData.size();
-            if (x > progressWidth) break;
-            float amplitude = m_waveformData[i];
-            int lineHeight = static_cast<int>(amplitude * h / 2);
+            painter.setPen(QPen(x <= progressWidth ? wavePlayed : waveUnplayed, 1));
             painter.drawLine(x, h / 2, x, h / 2 + lineHeight);
             painter.drawLine(x, h / 2, x, h / 2 - lineHeight);
         }
     } else {
-        // Placeholder drawing
-        painter.setPen(QPen(Qt::gray, 1));
+        // Placeholder center line while the waveform is still decoding (or
+        // failed to decode) - the colored progress fill above still works.
+        painter.setPen(QPen(Qt::white, 1));
         int centerY = height() / 2;
         painter.drawLine(0, centerY, width(), centerY);
     }
